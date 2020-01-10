@@ -101,7 +101,7 @@ int main()
 					res = res && execC2CfftPlan(srcToFFTPlan, fftCdataPtr, fftCdataPtr, 0);
 					if (!res) break;
 
-					
+					CuH_ROIdevComplex(fftCdataPtr, src.cols, src.rows, 0, 0, src.cols / 2, src.rows);
 					
 					CuH_magnitudeDevC2R(fftCdataPtr, src.cols , src.rows, nullptr);
 					
@@ -116,7 +116,7 @@ int main()
 					//afterMagnitude += Scalar::all(1);
 					//log(afterMagnitude, afterMagnitude);
 
-					CuH_logDevR2R(nullptr, src.cols , src.rows, 1.0f, nullptr);
+					CuH_logDevR2R(nullptr, src.cols/2 , src.rows, 1.0f, nullptr);
 
 					//magI = magI(Rect(0, 0, magI.cols / 2, magI.rows));	//.clone()
 
@@ -128,8 +128,10 @@ int main()
 					//waitKey(1);
 
 					Mat outMat;
-					outMat.create(src.rows, src.cols, CV_16UC1);
-					CuH_cvtDevRealTo16UC1(nullptr, src.cols, src.rows, 4000.0f, 0, (unsigned short*)outMat.data);
+					outMat.create(src.rows, src.cols/2, CV_16UC1);
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 4000.0f, 0, (unsigned short*)outMat.data);
+
+					resize(outMat, outMat, Size(1024, 512));
 
 					imshow("outMat", outMat);
 					waitKey(1);

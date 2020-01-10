@@ -108,6 +108,10 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_cpy16UC1ToDevComplex(unsigned short *srcHost, FFT_Complex *dstDev, int cols, int rows);
 
+	//ROI of data[rows][cols] to  data[height][width] of RECT{(x,y),(width,height)}
+	//if data==nullptr , use interal dev_temp_4M2 buffer as precess data
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, int width, int height);
 
 #if defined(__cplusplus)||defined(c_plusplus)
 }

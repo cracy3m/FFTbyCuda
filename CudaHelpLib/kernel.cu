@@ -123,6 +123,15 @@ __global__ void cpy16UC1ToComplex_Kernel(unsigned short * datain, FFT_Complex * 
 	}
 }
 
+__global__ void ROI_Complex_Kernel(FFT_Complex * datain, FFT_Complex *dataout) {
+	unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		dataout[j*devC_cols + i].re = datain[(j + devC_y)*devC_divc + i + devC_x].re;
+		dataout[j*devC_cols + i].im = datain[(j + devC_y)*devC_divc + i + devC_x].im;
+	}
+}
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -872,4 +881,84 @@ int CuH_cpy16UC1ToDevComplex(unsigned short *srcHost, FFT_Complex *dstDev, int c
 
 
 	return 0;
+}
+
+int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, int width, int height) {
+
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_x, &x, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_y, &y, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &width, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &height, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_divc, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	FFT_Complex *srcCptr = nullptr;
+	if (dataDev) {
+		srcCptr = dataDev;
+	}
+	else {
+		srcCptr = (FFT_Complex *)dev_temp_4M2;
+	}
+	cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)srcCptr, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		return 1;
+	}
+
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(width / 16, height / 16);
+	if (width % 16) {
+		gridS.x += 1;
+	}
+	if (height % 16) {
+		gridS.y += 1;
+	}
+
+	ROI_Complex_Kernel<<<gridS, blockS >>>((FFT_Complex*)dev_temp_4M1, srcCptr);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "ROI_Complex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching ROI_Complex_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return  0;
+
 }
