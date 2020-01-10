@@ -120,6 +120,10 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_transpose16UC1(int rows, int cols, void* host_src, void *host_dst);
 
+	//dataDev calc with fft window data winDev and dispersion data dispersionDev
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_devCdataCalcWinAndDispersion(int cols, int rows, FFT_Complex *dataDev, FFT_Real *winDev, FFT_Complex *dispersionDev);
+
 #if defined(__cplusplus)||defined(c_plusplus)
 }
 #endif

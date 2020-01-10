@@ -141,6 +141,20 @@ __global__ void transpose16UC1_Kernel(unsigned short * datain, unsigned short *d
 	}
 }
 
+__global__ void calcWinAndDispersion(FFT_Complex *data, FFT_Real *wind, FFT_Complex *dispersion) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		FFT_Real d1 = data[index].re*dispersion[i].re - data[index].im*dispersion[i].im;
+		FFT_Real d2 = data[index].im*dispersion[i].re + data[index].re*dispersion[i].im;
+		d1 *= wind[i];
+		d2 *= wind[i];
+		data[index].re = d1;
+		data[index].im = d2;
+	}
+}
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -1052,4 +1066,52 @@ int CuH_transpose16UC1(int rows, int cols, void* host_src, void *host_dst) {
 	}
 
 	return  0;
+}
+
+int CuH_devCdataCalcWinAndDispersion(int cols, int rows, FFT_Complex *dataDev, FFT_Real *winDev, FFT_Complex *dispersionDev) {
+
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+
+	calcWinAndDispersion <<<gridS, blockS >>>(dataDev, winDev, dispersionDev);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "calcWinAndDispersion Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_devCdataCalcWinAndDispersion returned error code %d after launching calcWinAndDispersion!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
 }
