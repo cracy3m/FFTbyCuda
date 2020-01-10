@@ -113,6 +113,13 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, int width, int height);
 
+	//transpose interal dev_temp_4M2
+	//if host_src==nullptr, use interal dev_temp_4M2 buffer as source data
+	//@param rows is before transpose size
+	//@param cols is before transpose size
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_transpose16UC1(int rows, int cols, void* host_src, void *host_dst);
+
 #if defined(__cplusplus)||defined(c_plusplus)
 }
 #endif

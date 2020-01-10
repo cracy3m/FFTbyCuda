@@ -127,11 +127,14 @@ int main()
 					//imshow("outMat", outMat);
 					//waitKey(1);
 
-					Mat outMat;
-					outMat.create(src.rows, src.cols/2, CV_16UC1);
-					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 4000.0f, 0, (unsigned short*)outMat.data);
+					
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 4000.0f, 0, nullptr);
 
-					resize(outMat, outMat, Size(1024, 512));
+					Mat outMat;
+					outMat.create(src.cols / 2, src.rows, CV_16UC1);
+					CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, outMat.data);
+
+					resize(outMat, outMat, Size(512, 512));
 
 					imshow("outMat", outMat);
 					waitKey(1);

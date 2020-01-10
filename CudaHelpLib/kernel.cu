@@ -132,6 +132,15 @@ __global__ void ROI_Complex_Kernel(FFT_Complex * datain, FFT_Complex *dataout) {
 	}
 }
 
+__global__ void transpose16UC1_Kernel(unsigned short * datain, unsigned short *dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	unsigned char data;
+	if (i<devC_cols && j<devC_rows) {
+		dataout[i*devC_rows + j] = datain[j*devC_cols + i];
+	}
+}
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -961,4 +970,86 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 
 	return  0;
 
+}
+
+int  transpose16UC1(int rows, int cols, void* dev_src, void *dev_dst)
+{
+	int res = 0;
+	cudaError_t cudaStatus = cudaSuccess;
+	//copy constant
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+
+	//invoke kernel
+	transpose16UC1_Kernel <<<gridS, blockS >>>((unsigned short *)dev_src, (unsigned short *)dev_dst);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "transpose16UC1 Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching transpose16UC1_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return res;
+}
+
+int CuH_transpose16UC1(int rows, int cols, void* host_src, void *host_dst) {
+	cudaError_t cudaStatus = cudaSuccess;
+
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	if (host_src) {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, host_src, rows*cols*sizeof(unsigned short), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	if (transpose16UC1(rows, cols, (void*)dev_temp_4M1, (void*)dev_temp_4M2)) return 1;
+
+	if (host_dst) {
+		cudaStatus = cudaMemcpy(host_dst, dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	return  0;
 }
