@@ -10,6 +10,104 @@
 static int isCudaOk = 0;
 static _CUDA_DEV_INFO deviceinfo;
 
+///dev constant define
+__constant__  int devC_cols;
+__constant__  int devC_rows;
+__constant__  int devC_divc;
+__constant__  int devC_x;
+__constant__  int devC_y;
+__constant__  float devC_f1;
+__constant__  float devC_xe;
+__constant__  float devC_ye;
+__constant__  float devC_ze;
+__constant__ unsigned int devC_Palette[512];
+//float guassianTable[512];
+
+////////////////////
+
+static int *dev_temp_4M1 = 0;
+static int *dev_temp_4M2 = 0;
+static int *dev_temp_4M3 = 0;
+static unsigned char *dev_background_4M = 0;
+static unsigned char *dev_cuboid = 0;
+////////////////////////////////
+
+
+
+//>>>>>>>>>>>>>>>>share lib main func
+#ifndef Q_OS_LINUX
+#include "Windows.h"
+
+BOOL APIENTRY DllMain(HMODULE hModule,
+	DWORD  ul_reason_for_call,
+	LPVOID lpReserved
+	)
+{
+	switch (ul_reason_for_call)
+	{
+	case DLL_PROCESS_ATTACH:
+		break;
+	case DLL_THREAD_ATTACH:
+		break;
+	case DLL_THREAD_DETACH:
+		break;
+	case DLL_PROCESS_DETACH:
+		CuH_FreeTempCudaMem();
+		break;
+	}
+	return TRUE;
+}
+
+#endif
+//<<<<<<<<<<<<<
+
+
+//////////////////////////////////////////////////////////////////////////
+// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>cuda  kernel function //////////////////
+//////////////////////////////////////////////////////////////////////
+
+__global__ void magnitude32F_Kernel(FFT_Complex * datain, FFT_Real * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		float d = datain[index].re*datain[index].re + datain[index].im*datain[index].im;
+		d = sqrtf(d);
+		dataout[index] = d;
+	}
+}
+
+__global__ void logAddBeta32F_Kernel(FFT_Real * datain, FFT_Real * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		float beta = *((float*)(&devC_y));
+		float d = datain[index];
+		d = d + beta;
+		d = logf(d);
+		dataout[index] = d;
+	}
+}
+
+__global__ void cvtAndScale32Fto16U_Kernel(FFT_Real * datain, unsigned short * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		float d = *((float*)(&devC_x));
+		float beta = *((float*)(&devC_y));
+		d = d*datain[index] + beta;
+		d = (d >= 0 && d <= 65535.0f)*d + (d > 65535.0f)*65535.0f;
+		dataout[index] = d;
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
+//////////////////////////////////////////////////////////////////////
+
+
 void CUDACALLMODE setIsCudaAccLibOK(int isok) {
 	isCudaOk = isok;
 }
@@ -59,6 +157,72 @@ int  setCudaDevTo(int id) {
 	}
 	else {
 		return 0;
+	}
+}
+
+void CUDACALLMODE cudaNop(void) {
+	cudaError_t cudaStatus = cudaSuccess;
+
+	if (dev_temp_4M1 == 0) {
+		cudaStatus = cudaMalloc((void**)&dev_temp_4M1, 1024 * 1024 * 32);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+
+		}
+	}
+
+	if (dev_temp_4M2 == 0) {
+		cudaStatus = cudaMalloc((void**)&dev_temp_4M2, 1024 * 1024 * 32);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+
+		}
+	}
+	if (dev_temp_4M3 == 0) {
+		cudaStatus = cudaMalloc((void**)&dev_temp_4M3, 1024 * 1024 * 32);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+
+		}
+	}
+	if (dev_background_4M == 0) {
+		cudaStatus = cudaMalloc((void**)&dev_background_4M, 1024 * 1024 * 32);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMalloc failed!");
+
+		}
+	}
+}
+
+void CuH_FreeTempCudaMem(void) {
+	if (dev_temp_4M1 != 0) {
+		cudaFree(dev_temp_4M1);
+		dev_temp_4M1 = 0;
+	}
+
+	if (dev_temp_4M2 != 0) {
+		cudaFree(dev_temp_4M2);
+		dev_temp_4M2 = 0;
+	}
+
+	if (dev_temp_4M3 != 0) {
+		cudaFree(dev_temp_4M2);
+		dev_temp_4M3 = 0;
+	}
+
+	if (dev_background_4M != 0) {
+		cudaFree(dev_background_4M);
+		dev_background_4M = 0;
+	}
+
+
+	if (cudaDeviceSynchronize() != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error!\n");
+	}
+
+
+	if (cudaDeviceReset() != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceReset failed!\n");
 	}
 }
 
@@ -217,6 +381,18 @@ int cudaMemDevToDev(void *dstDev, void *srcDev, size_t byteSize) {
 	}
 }
 
+int destroyFFTPlan(FFTPlan_Handle plan) {
+	cufftResult cudaStatus = CUFFT_SUCCESS;
+	cudaStatus = cufftDestroy(plan);
+
+	if (cudaStatus == CUFFT_SUCCESS) {
+		return 1;
+	}
+	else {
+		return 0;
+	}
+}
+
 int createFFTPlan1d_R2C(FFTPlan_Handle *plan, int cols, int rows) {
 	if (cols < 0) {
 		*plan = 0;
@@ -236,9 +412,16 @@ int createFFTPlan1d_R2C(FFTPlan_Handle *plan, int cols, int rows) {
 	}
 }
 
-int destroyFFTPlan(FFTPlan_Handle plan) {
+int createFFTPlan1d_C2C(FFTPlan_Handle *plan, int cols, int rows) {
+	if (cols < 0) {
+		*plan = 0;
+		return 0;
+	}
+
+	if (rows < 0) rows = 1;
+
 	cufftResult cudaStatus = CUFFT_SUCCESS;
-	cudaStatus = cufftDestroy(plan);
+	cudaStatus = cufftPlan1d(plan, cols, CUFFT_C2C, rows);
 
 	if (cudaStatus == CUFFT_SUCCESS) {
 		return 1;
@@ -247,6 +430,26 @@ int destroyFFTPlan(FFTPlan_Handle plan) {
 		return 0;
 	}
 }
+
+int createFFTPlan1d_C2R(FFTPlan_Handle *plan, int cols, int rows) {
+	if (cols < 0) {
+		*plan = 0;
+		return 0;
+	}
+
+	if (rows < 0) rows = 1;
+
+	cufftResult cudaStatus = CUFFT_SUCCESS;
+	cudaStatus = cufftPlan1d(plan, cols, CUFFT_C2R, rows);
+
+	if (cudaStatus == CUFFT_SUCCESS) {
+		return 1;
+	}
+	else {
+		return 0;
+	}
+}
+
 
 int execR2CfftPlan(FFTPlan_Handle plan, FFT_Real *idata, FFT_Complex *odata) {
 	cufftResult cudaStatus = CUFFT_SUCCESS;
@@ -257,4 +460,224 @@ int execR2CfftPlan(FFTPlan_Handle plan, FFT_Real *idata, FFT_Complex *odata) {
 	else {
 		return 0;
 	}
+}
+
+int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostDst) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	FFT_Complex *srcPtr = 0;
+	if (devSrc) {
+		srcPtr = devSrc;
+	}
+	else {
+		srcPtr = (FFT_Complex*)dev_temp_4M1;
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	magnitude32F_Kernel <<<gridS, blockS >>>(srcPtr, (FFT_Real*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "magnitude32F_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_magnitudeDevC2R returned error code %d after launching magnitude32F_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	if (hostDst) {
+		cudaStatus = cudaMemcpy(hostDst, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+
+int CuH_logDevR2R(FFT_Real *devSrc, int cols, int rows, float beta, FFT_Real *hostDst) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_y, &beta, sizeof(float));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	FFT_Real *srcPtr = 0;
+	if (devSrc) {
+		srcPtr = devSrc;
+	}
+	else {
+		srcPtr = (FFT_Real*)dev_temp_4M1;
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	logAddBeta32F_Kernel <<<gridS, blockS >>>(srcPtr, (FFT_Real*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "logAddBeta32F_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_logDevR2R returned error code %d after launching logAddBeta32F_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	if (hostDst) {
+		cudaStatus = cudaMemcpy(hostDst, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+int CuH_cvtDevRealTo16UC1(FFT_Real *devSrc, int cols, int rows, float alpha, float beta, unsigned short *hostDst) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_x, &alpha, sizeof(float));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_y, &beta, sizeof(float));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	FFT_Real *srcPtr = 0;
+	if (devSrc) {
+		srcPtr = devSrc;
+	}
+	else {
+		srcPtr = (FFT_Real*)dev_temp_4M1;
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	cvtAndScale32Fto16U_Kernel <<<gridS, blockS >>>(srcPtr, (unsigned short*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cvtAndScale32Fto16U_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_cvtDevRealTo16UC1 returned error code %d after launching cvtAndScale32Fto16U_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	if (hostDst) {
+		cudaStatus = cudaMemcpy(hostDst, dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	return 0;
 }

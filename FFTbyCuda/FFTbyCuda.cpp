@@ -52,6 +52,8 @@ void initCudaAccLib() {
 			sprintf(str, "current cuda dev id = %d\n", gpu_device_id);
 			cout << str;
 
+			cudaNop();
+
 			m_isCudaAccLibOK = true;
 		}
 		else {
@@ -69,7 +71,8 @@ int main()
 	if (!src.empty() && src.data) {
 		initCudaAccLib();
 		imshow("src", src);
-		
+		waitKey(1);
+
 		if ((src.type() == CV_16UC1) && getIsCudaAccLibOK()){
 			Mat floatmat = Mat_<float>(src);
 			
@@ -97,27 +100,38 @@ int main()
 					res = res && execR2CfftPlan(srcToFFTPlan, (FFT_Real*)fftCdataPtr, fftCdataPtr);
 					if (!res) break;
 
-					float *after1stFFTBufptr = new float[sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows / sizeof(float)];
-					Mat after1stFFTCMat(floatmat.rows, floatmat.cols/2 + 1, CV_32FC2, after1stFFTBufptr);
+					
+					
+					CuH_magnitudeDevC2R(fftCdataPtr, floatmat.cols / 2 + 1, floatmat.rows, nullptr);
+					
 
-					cudaMemToHost(after1stFFTBufptr, fftCdataPtr, sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows);
+					//cudaMemToHost(after1stFFTBufptr, fftCdataPtr, sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows);
+					//Mat planes[2];
+					//split(after1stFFTCMat, planes);
+					//magnitude(planes[0], planes[1], planes[0]);     //planes[0] = magnitude
+					//Mat magI = planes[0];
+					//magI += Scalar::all(1);
+					//log(magI, magI);                //转换到对数尺度(logarithmic scale)
+					//afterMagnitude += Scalar::all(1);
+					//log(afterMagnitude, afterMagnitude);
 
-					Mat planes[2];
-					split(after1stFFTCMat, planes);
-					magnitude(planes[0], planes[1], planes[0]);     //planes[0] = magnitude
-					Mat magI = planes[0];
-					magI += Scalar::all(1);
-					log(magI, magI);                //转换到对数尺度(logarithmic scale)
+					CuH_logDevR2R(nullptr, floatmat.cols / 2 + 1, floatmat.rows, 1.0f, nullptr);
 
 					//magI = magI(Rect(0, 0, magI.cols / 2, magI.rows));	//.clone()
 
 					//归一化处理，用0-1之间的浮点数将矩阵变换为可视的图像格式
 					//normalize(magI, magI, 0, 1, CV_MINMAX);
-					Mat outMat = Mat_<unsigned short>(magI);
-					magI.convertTo(outMat, CV_16U, 4000.0);
-					imshow("outMat", outMat);
+					//Mat outMat = Mat_<unsigned short>(afterLog);
+					//afterLog.convertTo(outMat, CV_16U, 4000.0);
+					//imshow("outMat", outMat);
+					//waitKey(1);
 
-					delete[] after1stFFTBufptr;
+					Mat outMat;
+					outMat.create(floatmat.rows, floatmat.cols / 2 + 1, CV_16UC1);
+					CuH_cvtDevRealTo16UC1(nullptr, floatmat.cols / 2 + 1, floatmat.rows, 4000.0f, 0, (unsigned short*)outMat.data);
+
+					imshow("outMat", outMat);
+					waitKey(1);
 
 				} while (0);
 			}
@@ -133,8 +147,8 @@ int main()
 		}
 
 		waitKey(0);
+		CuH_FreeTempCudaMem();
 	}
 
     return 0;
 }
-
