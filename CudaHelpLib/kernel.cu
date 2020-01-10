@@ -103,6 +103,26 @@ __global__ void cvtAndScale32Fto16U_Kernel(FFT_Real * datain, unsigned short * d
 	}
 }
 
+__global__ void cpyRealToComplex_Kernel(FFT_Real * datain, FFT_Complex * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		dataout[index].re = datain[index];
+		dataout[index].im = 0;
+	}
+}
+
+__global__ void cpy16UC1ToComplex_Kernel(unsigned short * datain, FFT_Complex * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		const int index = j*devC_cols + i;
+		dataout[index].re = datain[index];
+		dataout[index].im = 0;
+	}
+}
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -462,6 +482,32 @@ int execR2CfftPlan(FFTPlan_Handle plan, FFT_Real *idata, FFT_Complex *odata) {
 	}
 }
 
+int execC2CfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Complex *odata ,int dir) {
+	cufftResult cudaStatus = CUFFT_SUCCESS;
+	int d = CUFFT_FORWARD;
+	if (d) {
+		d = CUFFT_INVERSE;
+	}
+	cudaStatus = cufftExecC2C(plan, (cufftComplex*)idata, (cufftComplex*)odata, d);
+	if (cudaStatus == CUFFT_SUCCESS) {
+		return 1;
+	}
+	else {
+		return 0;
+	}
+}
+
+int execC2RfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Real *odata) {
+	cufftResult cudaStatus = CUFFT_SUCCESS;
+	cudaStatus = cufftExecC2R(plan,(cufftComplex *) idata, (cufftReal*)odata);
+	if (cudaStatus == CUFFT_SUCCESS) {
+		return 1;
+	}
+	else {
+		return 0;
+	}
+}
+
 int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostDst) {
 	cudaError_t cudaStatus = cudaSuccess;
 	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
@@ -678,6 +724,152 @@ int CuH_cvtDevRealTo16UC1(FFT_Real *devSrc, int cols, int rows, float alpha, flo
 			return 1;
 		}
 	}
+
+	return 0;
+}
+
+
+int CuH_cpyHostRealToDevComplex(FFT_Real *srcHost, FFT_Complex *dstDev, int cols, int rows) {
+	if (!dstDev) return 1;
+	
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	if (srcHost) {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, srcHost, rows*cols*sizeof(FFT_Real), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	
+	cpyRealToComplex_Kernel <<<gridS, blockS >>>((FFT_Real*)dev_temp_4M1, dstDev);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cpyRealToComplex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_cpyHostRealToDevComplex returned error code %d after launching cpyRealToComplex_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	
+		//cudaStatus = cudaMemcpy(dev_temp_4M2, dstDev, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+		//if (cudaStatus != cudaSuccess) {
+		//	fprintf(stderr, "cudaMemcpy failed!");
+		//	return 1;
+		//}
+
+
+	return 0;
+
+}
+
+int CuH_cpy16UC1ToDevComplex(unsigned short *srcHost, FFT_Complex *dstDev, int cols, int rows) {
+	if (!dstDev) return 1;
+
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	if (srcHost) {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, srcHost, rows*cols*sizeof(unsigned short), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	cpy16UC1ToComplex_Kernel <<<gridS, blockS >>>((unsigned short*)dev_temp_4M1, dstDev);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cpy16UC1ToComplex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "CuH_cpyHostRealToDevComplex returned error code %d after launching cpy16UC1ToComplex_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+
+	//cudaStatus = cudaMemcpy(dev_temp_4M2, dstDev, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+	//if (cudaStatus != cudaSuccess) {
+	//	fprintf(stderr, "cudaMemcpy failed!");
+	//	return 1;
+	//}
+
 
 	return 0;
 }

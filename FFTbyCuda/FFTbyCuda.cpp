@@ -74,35 +74,36 @@ int main()
 		waitKey(1);
 
 		if ((src.type() == CV_16UC1) && getIsCudaAccLibOK()){
-			Mat floatmat = Mat_<float>(src);
+			//Mat floatmat = Mat_<float>(src);
 			
 			
 			FFT_Complex *fftCdataPtr = nullptr;
 			FFTPlan_Handle srcToFFTPlan = 0;
 
-			if (floatmat.data) {
+			if (src.data) {
 				do {
 					int res = 1;
 
 					res = res && allocateFFTComplex(&fftCdataPtr,
-						sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows
+						sizeof(FFT_Complex)*src.cols*src.rows
 						);
 
 					if (!res) break;
 
-					res = res && createFFTPlan1d_R2C(&srcToFFTPlan, floatmat.cols, floatmat.rows);
+					res = res && createFFTPlan1d_C2C(&srcToFFTPlan, src.cols, src.rows);
 					if (!res) break;
 
-					res = res && cudaMemFromHost(fftCdataPtr, floatmat.data,
-						sizeof(float)*floatmat.cols*floatmat.rows);
-					if (!res) break;
+					//res = res && cudaMemFromHost(fftCdataPtr, floatmat.data,
+					//	sizeof(float)*floatmat.cols*floatmat.rows);
+					//if (!res) break;
+					CuH_cpy16UC1ToDevComplex((unsigned short *)src.data, fftCdataPtr, src.cols, src.rows);
 
-					res = res && execR2CfftPlan(srcToFFTPlan, (FFT_Real*)fftCdataPtr, fftCdataPtr);
+					res = res && execC2CfftPlan(srcToFFTPlan, fftCdataPtr, fftCdataPtr, 0);
 					if (!res) break;
 
 					
 					
-					CuH_magnitudeDevC2R(fftCdataPtr, floatmat.cols / 2 + 1, floatmat.rows, nullptr);
+					CuH_magnitudeDevC2R(fftCdataPtr, src.cols , src.rows, nullptr);
 					
 
 					//cudaMemToHost(after1stFFTBufptr, fftCdataPtr, sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows);
@@ -115,7 +116,7 @@ int main()
 					//afterMagnitude += Scalar::all(1);
 					//log(afterMagnitude, afterMagnitude);
 
-					CuH_logDevR2R(nullptr, floatmat.cols / 2 + 1, floatmat.rows, 1.0f, nullptr);
+					CuH_logDevR2R(nullptr, src.cols , src.rows, 1.0f, nullptr);
 
 					//magI = magI(Rect(0, 0, magI.cols / 2, magI.rows));	//.clone()
 
@@ -127,8 +128,8 @@ int main()
 					//waitKey(1);
 
 					Mat outMat;
-					outMat.create(floatmat.rows, floatmat.cols / 2 + 1, CV_16UC1);
-					CuH_cvtDevRealTo16UC1(nullptr, floatmat.cols / 2 + 1, floatmat.rows, 4000.0f, 0, (unsigned short*)outMat.data);
+					outMat.create(src.rows, src.cols, CV_16UC1);
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols, src.rows, 4000.0f, 0, (unsigned short*)outMat.data);
 
 					imshow("outMat", outMat);
 					waitKey(1);

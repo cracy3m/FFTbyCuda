@@ -67,6 +67,12 @@ extern "C" {
 	CUDAACCLIBDLL int CUDACALLMODE createFFTPlan1d_C2R(FFTPlan_Handle *plan, int cols, int rows);
 
 	CUDAACCLIBDLL int CUDACALLMODE execR2CfftPlan(FFTPlan_Handle plan, FFT_Real *idata, FFT_Complex *odata);
+
+	//@param direction  0:FFT(forwart) 1:IFFT(inverse)
+	CUDAACCLIBDLL int CUDACALLMODE execC2CfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Complex *odata,int direction);
+	
+	CUDAACCLIBDLL int CUDACALLMODE execC2RfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Real *odata);
+
 	//<<<<<<<<<<<<<<return 1 means exec ok//
 
 	//calc magnitude from dev complex data to host real data
@@ -90,6 +96,17 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_cvtDevRealTo16UC1(FFT_Real *devSrc, int cols, int rows, float alpha, float beta, unsigned short *hostDst);
 
+	//copy host Real data to cuda Complex data 
+	//set dstDev[].Re=srcHost[] dstDev[].Im=0
+	//if devSrc==nullptr , use interal dev_temp_4M2 buffer as src data
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_cpyHostRealToDevComplex(FFT_Real *srcHost, FFT_Complex *dstDev, int cols, int rows);
+
+	//copy host 16UC1 data to cuda Complex data 
+	//set dstDev[].Re=srcHost[] dstDev[].Im=0
+	//if devSrc==nullptr , use interal dev_temp_4M2 buffer as src data
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_cpy16UC1ToDevComplex(unsigned short *srcHost, FFT_Complex *dstDev, int cols, int rows);
 
 
 #if defined(__cplusplus)||defined(c_plusplus)
