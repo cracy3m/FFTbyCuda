@@ -75,6 +75,16 @@ extern "C" {
 
 	//<<<<<<<<<<<<<<return 1 means exec ok//
 
+	//download gpu interal dev_temp_4M2 buffer to host_dst
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_downloadTemp4M2(int size, unsigned char* host_dst);
+
+
+	//upload host_src to gpu interal dev_temp_4M2 buffer
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_uploadTemp4M2(int size, unsigned char* host_src);
+
+
 	//calc magnitude from dev complex data to host real data
 	//if devSrc==nullptr , use interal dev_temp_4M2 buffer as src data
 	//if hostDst==nullptr , the calc result copy to interal dev_temp_4M2 buffer
@@ -123,6 +133,27 @@ extern "C" {
 	//dataDev calc with fft window data winDev and dispersion data dispersionDev
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_devCdataCalcWinAndDispersion(int cols, int rows, FFT_Complex *dataDev, FFT_Real *winDev, FFT_Complex *dispersionDev);
+
+	//use interal dev_temp_4M2 buffer to processe power(x,p),then store the result to dev_temp_4M2
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_power8UC1(int rows, int cols, float p);
+
+	// convert 16UC1 data (host_src) to 8UC1 data, { resualt=(255/winWidth)*(data-winCenter+winWidth/2) }
+	// if host_src == nullptr, use interal dev_temp_4M2 buffer as source data
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_pixWindow16UC1To8UC1(int rows, int cols, int winCenter, int winWidth, unsigned short *host_src);
+
+	//calc all image pixels average value
+	//if host_src==nullptr, use interal dev_temp_4M2 buffer as source data
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_allPixAvgValue(int rows, int cols, unsigned short* host_src, float *host_res);
+
+	//threshold 16UC1 data 
+	//if host_src==nullptr, use interal dev_temp_4M2 buffer as source data
+	//@param mode : bit_0=1 mean normal threshold {data=(data>=threshold)*data} else {data=(data>=threshold)*65535}
+	//				bit_7=1 mean normal threshold {data=(data<threshold)*data} else {data=(data<threshold)*65535}
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_threshold16UC1(int rows, int cols, int thres, int mode, unsigned short* host_src);
 
 #if defined(__cplusplus)||defined(c_plusplus)
 }

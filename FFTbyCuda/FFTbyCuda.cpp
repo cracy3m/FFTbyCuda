@@ -239,13 +239,36 @@ int main()
 					//waitKey(1);
 
 					
-					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 4000.0f, 0, nullptr);
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 2000.0f, 0, nullptr);
 
 					Mat outMat;
-					outMat.create(src.cols / 2, src.rows, CV_16UC1);
-					CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, outMat.data);
+					outMat.create(src.cols / 2, src.rows, CV_8UC1);
 
-					resize(outMat, outMat, Size(512, 800));
+					CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, nullptr);
+
+					float avg = 0.0f;
+					CuH_allPixAvgValue(outMat.rows, outMat.cols, nullptr, &avg);
+
+					avg *= 1.15;
+					CuH_threshold16UC1(outMat.rows, outMat.cols, (unsigned short)avg, 1, nullptr);
+
+					CuH_pixWindow16UC1To8UC1(outMat.rows, outMat.cols, 32767, 30000, nullptr);
+
+					CuH_power8UC1(outMat.rows, outMat.cols, 1.3f);
+
+					CuH_downloadTemp4M2(outMat.rows* outMat.cols, outMat.data);
+
+					for (int i = 0; i < 8; i++)
+					{
+						for (int j = 0; j < outMat.cols; j++)
+						{
+							outMat.data[i*outMat.cols + j] = 0;
+						}
+					}
+
+					imwrite("./../../result.png", outMat);
+
+					resize(outMat, outMat, Size(512, 1024));
 
 					imshow("outMat", outMat);
 					cv::waitKey(1);

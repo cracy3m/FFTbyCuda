@@ -155,6 +155,71 @@ __global__ void calcWinAndDispersion(FFT_Complex *data, FFT_Real *wind, FFT_Comp
 	}
 }
 
+__global__ void power8UC1_Kernel(unsigned char * datain, unsigned char * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		float d = datain[j*devC_cols + i];
+		d = powf(d, devC_f1);
+		if (d>255.0f) d = 255.0f;
+		dataout[j*devC_cols + i] = d;
+	}
+}
+
+__global__ void pixWindow16UC1To8UC1_Kernel(unsigned short * datain, unsigned char * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	float s_v = devC_y;
+	float delta = devC_y;
+	s_v /= 2.0f;
+	s_v = devC_x - s_v;
+	delta = 256.0f / delta;
+
+	if (i<devC_cols && j<devC_rows) {
+		float d = datain[j*devC_cols + i];
+		d = d - s_v;
+		d = d*delta;
+		d = d*(d>0.0f);
+		d = d*(d <= 255.0f);    //+255.0*(d>255.0f)
+		dataout[j*devC_cols + i] = d;
+	}
+}
+
+__global__ void allPixAvg_Kernel(unsigned short *datain , float *dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	const unsigned int index = j * 256 + i;
+	float sum = 0;
+
+	if (index < devC_cols) {
+		for (int k = 0; k < devC_rows; k++)
+		{
+			sum = sum + datain[k*devC_cols + index];
+			if (k > 0) sum /= 2.0f;
+		}
+		dataout[index] = sum;
+	}
+	
+}
+
+__global__ void threshold16UC1_Kernel(unsigned short * datain, unsigned short * dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i<devC_cols && j<devC_rows) {
+		int th = 0;
+		th = (datain[j*devC_cols + i] >= devC_x);
+		if (devC_divc & 0x0080) th = ~th;
+		if ((devC_divc & 0x000F) == 0) {
+			dataout[j*devC_cols + i] = th * 65535;
+		}
+		else if ((devC_divc & 0x000F) == 1) {
+			dataout[j*devC_cols + i] = th*datain[j*devC_cols + i];
+		}
+
+	}
+
+}
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -539,6 +604,31 @@ int execC2RfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Real *odata) {
 		return 0;
 	}
 }
+
+
+int CuH_downloadTemp4M2(int size, unsigned char* host_dst) {
+	cudaError_t cudaStatus = cudaSuccess;
+	cudaStatus = cudaMemcpy((void*)host_dst, dev_temp_4M2, size, cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		return 1;
+	}
+
+	return 0;
+}
+
+
+int CuH_uploadTemp4M2(int size, unsigned char* host_dst) {
+	cudaError_t cudaStatus = cudaSuccess;
+	cudaStatus = cudaMemcpy(dev_temp_4M2, (void*)host_dst, size, cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		return 1;
+	}
+
+	return 0;
+}
+
 
 int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostDst) {
 	cudaError_t cudaStatus = cudaSuccess;
@@ -1114,4 +1204,299 @@ int CuH_devCdataCalcWinAndDispersion(int cols, int rows, FFT_Complex *dataDev, F
 	}
 
 	return 0;
+}
+
+
+int CuH_power8UC1(int rows, int cols, float p) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_f1, &p, sizeof(float));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols, cudaMemcpyDeviceToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	power8UC1_Kernel <<<gridS, blockS >>>((unsigned char*)dev_temp_4M1, (unsigned char*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "power8UC1 Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching power8UC1_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
+}
+
+
+int CuH_pixWindow16UC1To8UC1(int rows, int cols, int winCenter, int winWidth, unsigned short *host_src) {
+	
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_x, &winCenter, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_y, &winWidth, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	if (!host_src) {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)host_src, rows*cols*sizeof(unsigned short), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	pixWindow16UC1To8UC1_Kernel <<<gridS, blockS >>>((unsigned short*)dev_temp_4M1, (unsigned char*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "pixWindow16UC1To8UC1_Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching pixWindow16UC1To8UC1_Kernel!\n", cudaStatus);
+		return 1;
+	}
+	
+	return 0;
+
+}
+
+
+int CuH_allPixAvgValue(int rows, int cols, unsigned short* host_src, float *host_res) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0 || dev_temp_4M3 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	if (!host_src) {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)host_src, rows*cols*sizeof(unsigned short), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+
+	//calc block size
+	int dimx = 256;
+	int dimy = cols / dimx;
+	if (cols % dimx) {
+		dimy += 1;
+	}
+
+	allPixAvg_Kernel <<<dimy, dimx >>>((unsigned short*)dev_temp_4M1, (float *)dev_temp_4M3);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "allPixAvg_Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching allPixAvg_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	float *avgArr = (float*)malloc(rows*cols*sizeof(float));
+	if (!avgArr) {
+		fprintf(stderr, "malloc() failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpy((void*)avgArr, (void*)dev_temp_4M3, cols*sizeof(float), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		if (avgArr) {
+			free(avgArr);
+			avgArr = nullptr;
+		}
+		return 1;
+	}
+
+	for (int i = 1; i < cols; i++)
+	{
+		avgArr[0] += avgArr[i];
+		avgArr[0] /= 2.0f;
+	}
+	
+	host_res[0] = avgArr[0];
+
+	if (avgArr) {
+		free(avgArr);
+		avgArr = nullptr;
+	}
+	
+	return 0;
+}
+
+int CuH_threshold16UC1(int rows, int cols, int thres, int mode, unsigned short* host_src) {
+	
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_x, &thres, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_divc, &mode, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	if (host_src) {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)host_src, rows*cols*sizeof(unsigned short), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	else {
+		cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)dev_temp_4M2, rows*cols*sizeof(unsigned short), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+	
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+	
+	threshold16UC1_Kernel <<<gridS, blockS >>>((unsigned short*)dev_temp_4M1, (unsigned short*)dev_temp_4M2);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "threshold16UC1_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching threshold16UC1_Kernel!\n", cudaStatus);
+		return 1;
+	}
+	
+	return 0;
+	
 }
