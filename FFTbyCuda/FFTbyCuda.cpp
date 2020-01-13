@@ -209,9 +209,8 @@ int main()
 
 			if (src.data) {
 
-				transposeAndFFTbyCV(src);
+				//transposeAndFFTbyCV(src);
 				
-
 				do {
 					int res = 1;
 
@@ -266,7 +265,7 @@ int main()
 					
 					res = res && execC2CfftPlan(tranFFTPlan, fftCtranPtr, fftCtranPtr, 0);
 					if (!res) break;
-
+/*
 					CuH_ROIdevComplex(fftCtranPtr, tran_src.cols, tran_src.rows, 0, 0, tran_src.cols/2  , tran_src.rows);
 
 					tran_src.create(tran_src.rows, tran_src.cols / 2, CV_16UC1);
@@ -279,6 +278,35 @@ int main()
 
 					imshow("tran_fft", tran_src);
 					cv::waitKey(1);
+*/
+					Mat cttt;
+					cttt.create(tran_src.rows, tran_src.cols, CV_32FC2);
+					if (cttt.data) {	//cttt.data
+						cudaMemToHost(cttt.data, fftCtranPtr, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
+						FFT_Complex *ptr = (FFT_Complex *)cttt.data;
+						
+						for (int j = 0; j < tran_src.rows; j++)
+						{
+							for (int i = tran_src.cols / 2; i < tran_src.cols ; i++) //tran_src.cols/2
+							{
+								ptr[j*tran_src.cols + i].re /= tran_src.cols;
+								ptr[j*tran_src.cols + i].im /= tran_src.cols;
+							}
+						}
+
+						for (int j = 0; j < tran_src.rows; j++)
+						{
+							for (int i = 0; i < tran_src.cols/2; i++) //tran_src.cols/2
+							{
+								ptr[j*tran_src.cols + i].re = 0;
+								ptr[j*tran_src.cols + i].im = 0;
+							}
+						}
+						cudaMemFromHost(fftCtranPtr, cttt.data, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
+						if (execC2CfftPlan(tranFFTPlan, fftCtranPtr, fftCtranPtr, 1)) {
+							CuH_transposeComplex(tran_src.rows, tran_src.cols, fftCtranPtr,fftCdataPtr );
+						}
+					}
 
 					// 开fft窗 和 乘以色散 复数数组
 					CuH_devCdataCalcWinAndDispersion(src.cols, src.rows, fftCdataPtr, fftWinFuncPtr, dispersionCPtr);
@@ -322,7 +350,7 @@ int main()
 					float avg = 0.0f;
 					CuH_allPixAvgValue(outMat.rows, outMat.cols, nullptr, &avg);
 
-					avg *= 1.15;
+					avg *= 0;//1.15;
 					CuH_threshold16UC1(outMat.rows, outMat.cols, (unsigned short)avg, 1, nullptr);
 
 					CuH_pixWindow16UC1To8UC1(outMat.rows, outMat.cols, 32767, 30000, nullptr);
@@ -339,9 +367,11 @@ int main()
 						}
 					}
 
-					imwrite("./../../result.png", outMat);
+					
 
 					resize(outMat, outMat, Size(512, 1024));
+
+					imwrite("./../../result.png", outMat);
 
 					imshow("outMat", outMat);
 					cv::waitKey(1);

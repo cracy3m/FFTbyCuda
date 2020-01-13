@@ -601,7 +601,7 @@ int execR2CfftPlan(FFTPlan_Handle plan, FFT_Real *idata, FFT_Complex *odata) {
 int execC2CfftPlan(FFTPlan_Handle plan, FFT_Complex *idata, FFT_Complex *odata ,int dir) {
 	cufftResult cudaStatus = CUFFT_SUCCESS;
 	int d = CUFFT_FORWARD;
-	if (d) {
+	if (dir) {
 		d = CUFFT_INVERSE;
 	}
 	cudaStatus = cufftExecC2C(plan, (cufftComplex*)idata, (cufftComplex*)odata, d);
