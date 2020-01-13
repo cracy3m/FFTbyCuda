@@ -279,53 +279,17 @@ int main()
 					imshow("tran_fft", tran_src);
 					cv::waitKey(1);
 */
-					Mat cttt;
-					cttt.create(tran_src.rows, tran_src.cols, CV_32FC2);
-					if (cttt.data) {	//cttt.data
-						cudaMemToHost(cttt.data, fftCtranPtr, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
-						FFT_Complex *ptr = (FFT_Complex *)cttt.data;
-						
-						for (int j = 0; j < tran_src.rows; j++)
-						{
-							for (int i = tran_src.cols / 2; i < tran_src.cols ; i++) //tran_src.cols/2
-							{
-								ptr[j*tran_src.cols + i].re /= tran_src.cols;
-								ptr[j*tran_src.cols + i].im /= tran_src.cols;
-							}
-						}
-
-						for (int j = 0; j < tran_src.rows; j++)
-						{
-							for (int i = 0; i < tran_src.cols/2; i++) //tran_src.cols/2
-							{
-								ptr[j*tran_src.cols + i].re = 0;
-								ptr[j*tran_src.cols + i].im = 0;
-							}
-						}
-						cudaMemFromHost(fftCtranPtr, cttt.data, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
-						if (execC2CfftPlan(tranFFTPlan, fftCtranPtr, fftCtranPtr, 1)) {		//IFFT after zero left data
-
-
-							cudaMemToHost(cttt.data, fftCtranPtr, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
-							for (int j = 0; j < tran_src.rows; j++)
-							{
-								for (int i = 0; i < tran_src.cols; i++) //tran_src.cols/2
-								{
-									//ptr[j*tran_src.cols + i].re = 0;
-									ptr[j*tran_src.cols + i].im = 0;
-									//ptr[j*tran_src.cols + i].im /= tran_src.cols;
-								}
-							}
-							cudaMemFromHost(fftCtranPtr, cttt.data, tran_src.rows*tran_src.cols*sizeof(FFT_Complex));
-
-							CuH_transposeComplex(tran_src.rows, tran_src.cols, fftCtranPtr,fftCdataPtr );
-						}
+					
+					CuH_zeroLeftComplexAndDivConst(tran_src.rows, tran_src.cols, tran_src.cols, fftCtranPtr); //after fft by scan dir,zero the Complex data left side , and divided by tran_src.cols 
+					if (execC2CfftPlan(tranFFTPlan, fftCtranPtr, fftCtranPtr, 1)) {		//IFFT after zero left data
+						CuH_zeroComplexReOrIm(tran_src.rows, tran_src.cols, 0, fftCtranPtr);	//zero the Im of Complex data
+						CuH_transposeComplex(tran_src.rows, tran_src.cols, fftCtranPtr, fftCdataPtr);
 					}
 
 					// 开fft窗 和 乘以色散 复数数组
 					CuH_devCdataCalcWinAndDispersion(src.cols, src.rows, fftCdataPtr, fftWinFuncPtr, dispersionCPtr);
 
-					res = res && execC2CfftPlan(srcToFFTPlan, fftCdataPtr, fftCdataPtr, 1);
+					res = res && execC2CfftPlan(srcToFFTPlan, fftCdataPtr, fftCdataPtr, 1);	//IFFT by sample dir
 					if (!res) break;
 
 					CuH_ROIdevComplex(fftCdataPtr, src.cols, src.rows, 0, 0, src.cols / 2, src.rows);
@@ -367,7 +331,7 @@ int main()
 					//avg *= 0;//1.15;
 					//CuH_threshold16UC1(outMat.rows, outMat.cols, (unsigned short)avg, 1, nullptr);
 
-					CuH_pixWindow16UC1To8UC1(outMat.rows, outMat.cols, 32767, 30000, nullptr);
+					CuH_pixWindow16UC1To8UC1(outMat.rows, outMat.cols, 32767, 32768, nullptr);
 
 					CuH_power8UC1(outMat.rows, outMat.cols, 1.3f);
 

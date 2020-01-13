@@ -169,6 +169,16 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_threshold16UC1(int rows, int cols, int thres, int mode, unsigned short* host_src);
 
+	//set dataDev left side to zero,and then divided by N
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_zeroLeftComplexAndDivConst(int rows, int cols, float divConst, FFT_Complex *dataDev);
+
+	//set dataDev Re or Im to zero 
+	//@param mode  0:zero Im , 1:zero Re
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_zeroComplexReOrIm(int rows, int cols, int mode, FFT_Complex *dataDev);
+
+
 #if defined(__cplusplus)||defined(c_plusplus)
 }
 #endif

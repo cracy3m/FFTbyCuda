@@ -239,6 +239,31 @@ __global__ void threshold16UC1_Kernel(unsigned short * datain, unsigned short * 
 
 }
 
+__global__ void zeroLeftComplexAndDivConst_Kernel(FFT_Complex * data) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i < devC_cols && j < devC_rows) {
+		const int index = j*devC_cols + i;
+		data[index].re = (data[index].re / devC_f1)*(i >= (devC_cols/2));
+		data[index].im = (data[index].im / devC_f1)*(i >= (devC_cols/2));
+	}
+}
+
+
+__global__ void zeroComplexReOrIm_Kernel(FFT_Complex * data) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	if (i < devC_cols && j < devC_rows) {
+		const int index = j*devC_cols + i;
+		data[index].re = (data[index].re )*(devC_divc == 0);
+		data[index].im = (data[index].im)*(devC_divc == 1);
+	}
+}
+
+
+
+
+
 //////////////////////////////////////////////////////////////////////////
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<cuda  kernel function //////////////////
 //////////////////////////////////////////////////////////////////////
@@ -1680,4 +1705,108 @@ int CuH_threshold16UC1(int rows, int cols, int thres, int mode, unsigned short* 
 	
 	return 0;
 	
+}
+
+
+int CuH_zeroLeftComplexAndDivConst(int rows, int cols, float divConst, FFT_Complex *dataDev) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_f1, &divConst, sizeof(float));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	zeroLeftComplexAndDivConst_Kernel <<<gridS, blockS >>>(dataDev);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "zeroLeftComplexAndDivConst_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching zeroLeftComplexAndDivConst_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
+}
+
+
+int CuH_zeroComplexReOrIm(int rows, int cols, int mode, FFT_Complex *dataDev) {
+	cudaError_t cudaStatus = cudaSuccess;
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_divc, &mode, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	zeroComplexReOrIm_Kernel <<<gridS, blockS >>>(dataDev);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "zeroComplexReOrIm_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching zeroComplexReOrIm_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
 }
