@@ -132,10 +132,29 @@ __global__ void ROI_Complex_Kernel(FFT_Complex * datain, FFT_Complex *dataout) {
 	}
 }
 
+__global__ void transposeComplex_Kernel(FFT_Complex * datain, FFT_Complex *dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	//unsigned char data;
+	if (i<devC_cols && j<devC_rows) {
+		dataout[i*devC_rows + j].re = datain[j*devC_cols + i].re;
+		dataout[i*devC_rows + j].im = datain[j*devC_cols + i].im;
+	}
+}
+
+__global__ void transpose32FC1_Kernel(float * datain, float *dataout) {
+	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
+	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
+	//unsigned char data;
+	if (i<devC_cols && j<devC_rows) {
+		dataout[i*devC_rows + j] = datain[j*devC_cols + i];
+	}
+}
+
 __global__ void transpose16UC1_Kernel(unsigned short * datain, unsigned short *dataout) {
 	const unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
 	const unsigned int j = blockIdx.y*blockDim.y + threadIdx.y;
-	unsigned char data;
+	//unsigned char data;
 	if (i<devC_cols && j<devC_rows) {
 		dataout[i*devC_rows + j] = datain[j*devC_cols + i];
 	}
@@ -659,15 +678,26 @@ int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostD
 		gridS.y += 1;
 	}
 
+	FFT_Complex *tempCptr = nullptr;
+	cudaStatus = cudaMalloc((void**)&tempCptr, cols * rows * sizeof(FFT_Complex));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		return 1;
+	}
+
 	FFT_Complex *srcPtr = 0;
 	if (devSrc) {
 		srcPtr = devSrc;
 	}
 	else {
-		srcPtr = (FFT_Complex*)dev_temp_4M1;
-		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+		srcPtr = (FFT_Complex*)tempCptr;
+		cudaStatus = cudaMemcpy(tempCptr, dev_temp_4M2, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMemcpy failed!");
+			if (tempCptr) {
+				cudaFree(tempCptr);
+				tempCptr = nullptr;
+			}
 			return 1;
 		}
 	}
@@ -676,6 +706,10 @@ int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostD
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "magnitude32F_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		if (tempCptr) {
+			cudaFree(tempCptr);
+			tempCptr = nullptr;
+		}
 		return 1;
 	}
 
@@ -683,6 +717,10 @@ int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostD
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "CuH_magnitudeDevC2R returned error code %d after launching magnitude32F_Kernel!\n", cudaStatus);
+		if (tempCptr) {
+			cudaFree(tempCptr);
+			tempCptr = nullptr;
+		}
 		return 1;
 	}
 
@@ -690,6 +728,10 @@ int CuH_magnitudeDevC2R(FFT_Complex *devSrc, int cols, int rows, FFT_Real *hostD
 		cudaStatus = cudaMemcpy(hostDst, dev_temp_4M2, rows*cols*sizeof(FFT_Real), cudaMemcpyDeviceToHost);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMemcpy failed!");
+			if (tempCptr) {
+				cudaFree(tempCptr);
+				tempCptr = nullptr;
+			}
 			return 1;
 		}
 	}
@@ -1041,9 +1083,21 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 	else {
 		srcCptr = (FFT_Complex *)dev_temp_4M2;
 	}
-	cudaStatus = cudaMemcpy((void*)dev_temp_4M1, (void*)srcCptr, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+
+	FFT_Complex *tempCptr = nullptr;
+	cudaStatus = cudaMalloc((void**)&tempCptr, cols * rows * sizeof(FFT_Complex));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMalloc failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpy((void*)tempCptr, (void*)srcCptr, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy failed!");
+		if (tempCptr) {
+			cudaFree(tempCptr);
+			tempCptr = nullptr;
+		}
 		return 1;
 	}
 
@@ -1058,10 +1112,14 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 		gridS.y += 1;
 	}
 
-	ROI_Complex_Kernel<<<gridS, blockS >>>((FFT_Complex*)dev_temp_4M1, srcCptr);
+	ROI_Complex_Kernel<<<gridS, blockS >>>(tempCptr, srcCptr);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "ROI_Complex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		if (tempCptr) {
+			cudaFree(tempCptr);
+			tempCptr = nullptr;
+		}
 		return 1;
 	}
 
@@ -1069,6 +1127,10 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching ROI_Complex_Kernel!\n", cudaStatus);
+		if (tempCptr) {
+			cudaFree(tempCptr);
+			tempCptr = nullptr;
+		}
 		return 1;
 	}
 
@@ -1120,6 +1182,125 @@ int  transpose16UC1(int rows, int cols, void* dev_src, void *dev_dst)
 	}
 
 	return res;
+}
+
+int CuH_transposeComplex(int rows, int cols, FFT_Complex* dev_src, FFT_Complex *dev_dst) {
+	cudaError_t cudaStatus = cudaSuccess;
+
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+	//invoke kernel
+	transposeComplex_Kernel <<<gridS, blockS >>>(dev_src, dev_dst);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "transposeComplex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching transposeComplex_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
+}
+
+int CuH_transpose32FC1(int rows, int cols, void* dev_src, void *dev_dst) {
+	cudaError_t cudaStatus = cudaSuccess;
+
+	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
+		printf("cuda mem alloc faild.\n");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "set const var failed!");
+		return 1;
+	}
+
+	float *datain = nullptr;
+
+	if (dev_src) {
+		datain = (float *)dev_src;
+	}
+	else {
+		datain = (float *)dev_temp_4M1;
+		cudaStatus = cudaMemcpy(dev_temp_4M1, dev_temp_4M2, rows*cols*sizeof(float), cudaMemcpyDeviceToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			return 1;
+		}
+	}
+
+	float *dataout = nullptr;
+	if (dev_dst) {
+		dataout = (float *)dev_dst;
+	}
+	else {
+		dataout = (float *)dev_temp_4M2;
+	}
+
+	//calc block size
+	dim3 blockS(16, 16);
+	dim3 gridS(cols / 16, rows / 16);
+	if (cols % 16) {
+		gridS.x += 1;
+	}
+	if (rows % 16) {
+		gridS.y += 1;
+	}
+
+
+	//invoke kernel
+	transpose32FC1_Kernel <<<gridS, blockS >>>(datain, dataout);
+	cudaStatus = cudaGetLastError();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "transpose32FC1_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+		return 1;
+	}
+
+	//wait kernel finish
+	cudaStatus = cudaDeviceSynchronize();
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching transpose32FC1_Kernel!\n", cudaStatus);
+		return 1;
+	}
+
+	return 0;
 }
 
 int CuH_transpose16UC1(int rows, int cols, void* host_src, void *host_dst) {

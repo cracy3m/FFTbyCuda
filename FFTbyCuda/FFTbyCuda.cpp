@@ -147,6 +147,41 @@ void initCudaAccLib() {
 	setIsCudaAccLibOK(m_isCudaAccLibOK);
 }
 
+void transposeAndFFTbyCV(Mat &img) {
+	Mat ttt;
+	cv::transpose(img, ttt);
+	imshow("ttt", ttt);
+	cv::waitKey(1);
+
+	Mat padded;                 //以0填充输入图像矩阵
+	int m = ttt.rows; //getOptimalDFTSize(disp.rows);
+	int n = getOptimalDFTSize(ttt.cols);
+
+	//填充输入图像I，输入矩阵为padded，上方和左方不做填充处理
+	copyMakeBorder(ttt, padded, 0, m - ttt.rows, 0, n - ttt.cols, BORDER_CONSTANT, Scalar::all(0));
+	Mat planes[] = { Mat_<float>(padded), Mat::zeros(padded.size(),CV_32F) };
+	Mat complexI;
+	merge(planes, 2, complexI);     //将planes融合合并成一个多通道数组complexI
+	dft(complexI, complexI, DFT_ROWS);        //进行傅里叶变换
+
+	split(complexI, planes);        //planes[0] = Re(DFT(I),planes[1] = Im(DFT(I))
+									//即planes[0]为实部,planes[1]为虚部
+	magnitude(planes[0], planes[1], planes[0]);     //planes[0] = magnitude
+	Mat magI = planes[0];
+	magI += Scalar::all(1);
+	log(magI, magI);                //转换到对数尺度(logarithmic scale)
+
+	magI = magI(Rect(0, 0, magI.cols / 2, magI.rows));	//.clone()
+
+														//归一化处理，用0-1之间的浮点数将矩阵变换为可视的图像格式
+														//normalize(magI, magI, 0, 1, CV_MINMAX);
+	Mat outMat = Mat_<unsigned short>(magI);
+	magI.convertTo(outMat, CV_16U, 4000.0);
+	imshow("ttt FFT Output Mat", outMat);
+
+	waitKey(0);
+}
+
 int main()
 {
 	Mat src = imread("./../../ats_raw_wave.png", CV_LOAD_IMAGE_UNCHANGED);
@@ -163,14 +198,28 @@ int main()
 			FFT_Complex *fftCdataPtr = nullptr;
 			FFTPlan_Handle srcToFFTPlan = 0;
 
+			FFT_Complex *fftCtranPtr = nullptr;
+			FFTPlan_Handle tranFFTPlan = 0;
+			
+
 			FFT_Real *fftWinFuncPtr = nullptr;
 			FFT_Complex *dispersionCPtr = nullptr;
 			FFT_Real *hostWinFunc = nullptr;
 			FFT_Complex *hostDispersion = nullptr;
 
 			if (src.data) {
+
+				transposeAndFFTbyCV(src);
+				
+
 				do {
 					int res = 1;
+
+					res = res && allocateFFTComplex(&fftCtranPtr,
+						sizeof(FFT_Complex)*src.cols*src.rows
+						);
+
+					if (!res) break;
 
 					res = res && allocateFFTComplex(&fftCdataPtr,
 						sizeof(FFT_Complex)*src.cols*src.rows
@@ -193,6 +242,10 @@ int main()
 					res = res && createFFTPlan1d_C2C(&srcToFFTPlan, src.cols, src.rows);
 					if (!res) break;
 
+					res = res && createFFTPlan1d_C2C(&tranFFTPlan, src.rows, src.cols);
+					if (!res) break;
+
+
 					hostWinFunc = new FFT_Real[src.cols];
 					hostDispersion = new FFT_Complex[src.cols];
 					GenerateWinFuncToReal(src.cols, hostWinFunc);
@@ -206,6 +259,27 @@ int main()
 					//if (!res) break;
 					CuH_cpy16UC1ToDevComplex((unsigned short *)src.data, fftCdataPtr, src.cols, src.rows);
 
+					//将复数 原始波形数据 转置  并进行 fft
+					Mat tran_src(src.cols, src.rows,CV_16UC1);
+
+					CuH_transposeComplex(src.rows, src.cols, fftCdataPtr, fftCtranPtr);
+					
+					res = res && execC2CfftPlan(tranFFTPlan, fftCtranPtr, fftCtranPtr, 0);
+					if (!res) break;
+
+					CuH_ROIdevComplex(fftCtranPtr, tran_src.cols, tran_src.rows, 0, 0, tran_src.cols/2  , tran_src.rows);
+
+					tran_src.create(tran_src.rows, tran_src.cols / 2, CV_16UC1);
+
+					CuH_magnitudeDevC2R(fftCtranPtr, tran_src.cols, tran_src.rows, nullptr);
+
+					CuH_logDevR2R(nullptr, tran_src.cols, tran_src.rows, 1.0f, nullptr);
+
+					CuH_cvtDevRealTo16UC1(nullptr, tran_src.cols , tran_src.rows, 4000.0f, 0, (unsigned short*)tran_src.data);
+
+					imshow("tran_fft", tran_src);
+					cv::waitKey(1);
+
 					// 开fft窗 和 乘以色散 复数数组
 					CuH_devCdataCalcWinAndDispersion(src.cols, src.rows, fftCdataPtr, fftWinFuncPtr, dispersionCPtr);
 
@@ -214,8 +288,7 @@ int main()
 
 					CuH_ROIdevComplex(fftCdataPtr, src.cols, src.rows, 0, 0, src.cols / 2, src.rows);
 					
-					CuH_magnitudeDevC2R(fftCdataPtr, src.cols , src.rows, nullptr);
-					
+					CuH_magnitudeDevC2R(fftCdataPtr, src.cols / 2, src.rows, nullptr);
 
 					//cudaMemToHost(after1stFFTBufptr, fftCdataPtr, sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows);
 					//Mat planes[2];
@@ -280,6 +353,10 @@ int main()
 				destroyFFTPlan(srcToFFTPlan);
 			}
 
+			if (tranFFTPlan) {
+				destroyFFTPlan(tranFFTPlan);
+			}
+
 			if (fftWinFuncPtr) {
 				freeCudaMem(fftWinFuncPtr);
 			}
@@ -294,6 +371,10 @@ int main()
 
 			if (hostDispersion) {
 				delete[] hostDispersion;
+			}
+
+			if (fftCtranPtr) {
+				freeCudaMem(fftCtranPtr);
 			}
 
 			if (fftCdataPtr) {

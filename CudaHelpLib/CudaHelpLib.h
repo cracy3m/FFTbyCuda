@@ -123,6 +123,20 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, int width, int height);
 
+	//transpose FFT_Complex cuda image data
+	//@param rows is before transpose size
+	//@param cols is before transpose size
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_transposeComplex(int rows, int cols, FFT_Complex* dev_src, FFT_Complex *dev_dst);
+
+	//transpose cuda float image data
+	//if dev_src==nullptr, use interal dev_temp_4M2 buffer as source data
+	//if dev_dst==nullptr, the calc result copy to interal dev_temp_4M2 buffer
+	//@param rows is before transpose size
+	//@param cols is before transpose size
+	//return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_transpose32FC1(int rows, int cols, void* dev_src, void *dev_dst);
+
 	//transpose interal dev_temp_4M2
 	//if host_src==nullptr, use interal dev_temp_4M2 buffer as source data
 	//@param rows is before transpose size
