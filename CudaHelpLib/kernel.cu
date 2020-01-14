@@ -333,7 +333,7 @@ void CUDACALLMODE cudaNop(void) {
 	}
 
 	if (dev_temp_4M2 == 0) {
-		cudaStatus = cudaMalloc((void**)&dev_temp_4M2, 1024 * 1024 * 32);
+		cudaStatus = cudaMalloc((void**)&dev_temp_4M2, 1024 * 1024 * 64);
 		if (cudaStatus != cudaSuccess) {
 			fprintf(stderr, "cudaMalloc failed!");
 
@@ -1101,32 +1101,6 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 		return 1;
 	}
 
-	FFT_Complex *srcCptr = nullptr;
-	if (dataDev) {
-		srcCptr = dataDev;
-	}
-	else {
-		srcCptr = (FFT_Complex *)dev_temp_4M2;
-	}
-
-	FFT_Complex *tempCptr = nullptr;
-	cudaStatus = cudaMalloc((void**)&tempCptr, cols * rows * sizeof(FFT_Complex));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		return 1;
-	}
-
-	cudaStatus = cudaMemcpy((void*)tempCptr, (void*)srcCptr, rows*cols*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		if (tempCptr) {
-			cudaFree(tempCptr);
-			tempCptr = nullptr;
-		}
-		return 1;
-	}
-
-
 	//calc block size
 	dim3 blockS(16, 16);
 	dim3 gridS(width / 16, height / 16);
@@ -1137,14 +1111,10 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 		gridS.y += 1;
 	}
 
-	ROI_Complex_Kernel<<<gridS, blockS >>>(tempCptr, srcCptr);
+	ROI_Complex_Kernel<<<gridS, blockS >>>(dataDev, (FFT_Complex *)dev_temp_4M2);
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "ROI_Complex_Kernel Kernel failed: %s\n", cudaGetErrorString(cudaStatus));
-		if (tempCptr) {
-			cudaFree(tempCptr);
-			tempCptr = nullptr;
-		}
 		return 1;
 	}
 
@@ -1152,10 +1122,12 @@ int CuH_ROIdevComplex(FFT_Complex *dataDev, int cols, int rows, int x, int y, in
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching ROI_Complex_Kernel!\n", cudaStatus);
-		if (tempCptr) {
-			cudaFree(tempCptr);
-			tempCptr = nullptr;
-		}
+		return 1;
+	}
+
+	cudaStatus = cudaMemcpy(dataDev, dev_temp_4M2, width*height*sizeof(FFT_Complex), cudaMemcpyDeviceToDevice);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
 		return 1;
 	}
 
