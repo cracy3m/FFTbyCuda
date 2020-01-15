@@ -177,6 +177,9 @@ extern "C" {
 	//return 0 means exec ok
 	CUDAACCLIBDLL int CUDACALLMODE CuH_zeroComplexReOrIm(int rows, int cols, int mode, FFT_Complex *dataDev);
 
+	// use interal dev_temp_4M2 buffer as source data , do Horizontal flip
+	// return 0 means exec ok
+	CUDAACCLIBDLL int CUDACALLMODE CuH_flipH8UC1(int rows, int cols);
 
 #if defined(__cplusplus)||defined(c_plusplus)
 }

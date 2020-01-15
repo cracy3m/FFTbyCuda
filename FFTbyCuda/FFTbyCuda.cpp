@@ -294,7 +294,7 @@ int main()
 
 					CuH_ROIdevComplex(fftCdataPtr, src.cols, src.rows, 0, 0, src.cols / 2, src.rows);
 					
-					CuH_magnitudeDevC2R(fftCdataPtr, src.cols / 2, src.rows, nullptr);
+					CuH_magnitudeDevC2R(fftCdataPtr, src.cols /2, src.rows, nullptr);
 
 					//cudaMemToHost(after1stFFTBufptr, fftCdataPtr, sizeof(FFT_Complex)*(floatmat.cols / 2 + 1)*floatmat.rows);
 					//Mat planes[2];
@@ -306,7 +306,7 @@ int main()
 					//afterMagnitude += Scalar::all(1);
 					//log(afterMagnitude, afterMagnitude);
 
-					CuH_logDevR2R(nullptr, src.cols/2 , src.rows, 1.0f, nullptr);
+					CuH_logDevR2R(nullptr, src.cols /2 , src.rows, 1.0f, nullptr);
 
 					//magI = magI(Rect(0, 0, magI.cols / 2, magI.rows));	//.clone()
 
@@ -318,10 +318,10 @@ int main()
 					//waitKey(1);
 
 					
-					CuH_cvtDevRealTo16UC1(nullptr, src.cols/2, src.rows, 2000.0f, 0, nullptr);
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols /2 , src.rows, 2000.0f, 0, nullptr);
 
 					Mat outMat;
-					outMat.create(src.cols / 2, src.rows, CV_8UC1);
+					outMat.create(src.cols/2 , src.rows, CV_8UC1);
 
 					CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, nullptr);
 
@@ -347,7 +347,7 @@ int main()
 
 					
 
-					resize(outMat, outMat, Size(512, 1024));
+					resize(outMat, outMat, Size(512, 768));
 
 					imwrite("./../../result.png", outMat);
 
