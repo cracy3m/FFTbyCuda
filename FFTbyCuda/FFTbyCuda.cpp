@@ -317,13 +317,15 @@ int main()
 					//imshow("outMat", outMat);
 					//waitKey(1);
 
+					//32 float transpose
+					CuH_transpose32FC1(src.rows, src.cols / 2, nullptr, nullptr);
 					
-					CuH_cvtDevRealTo16UC1(nullptr, src.cols /2 , src.rows, 2000.0f, 0, nullptr);
+					CuH_cvtDevRealTo16UC1(nullptr, src.cols /2 , src.rows, 3000.0f, 0, nullptr);
 
 					Mat outMat;
 					outMat.create(src.cols/2 , src.rows, CV_8UC1);
 
-					CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, nullptr);
+					//CuH_transpose16UC1(outMat.cols, outMat.rows, nullptr, nullptr);
 
 					//float avg = 0.0f;
 					//CuH_allPixAvgValue(outMat.rows, outMat.cols, nullptr, &avg);
@@ -333,7 +335,7 @@ int main()
 
 					CuH_pixWindow16UC1To8UC1(outMat.rows, outMat.cols, 32767, 32768, nullptr);
 
-					CuH_power8UC1(outMat.rows, outMat.cols, 1.3f);
+					CuH_power8UC1(outMat.rows, outMat.cols, 1.1f);
 
 					CuH_downloadTemp4M2(outMat.rows* outMat.cols, outMat.data);
 
