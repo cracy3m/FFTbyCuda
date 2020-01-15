@@ -1215,37 +1215,6 @@ int CuH_transposeComplex(int rows, int cols, FFT_Complex* dev_src, FFT_Complex *
 	return 0;
 }
 
-int CuH_tranDevCtoHostDouble(int rows, int cols, FFT_Complex* dev_src, double *host_dst) {
-	cudaError_t cudaStatus = cudaSuccess;
-
-	if (dev_temp_4M1 == 0 || dev_temp_4M2 == 0) {
-		printf("cuda mem alloc faild.\n");
-		return 1;
-	}
-
-	cudaStatus = cudaMemcpyToSymbol(devC_rows, &rows, sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "set const var failed!");
-		return 1;
-	}
-
-	cudaStatus = cudaMemcpyToSymbol(devC_cols, &cols, sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "set const var failed!");
-		return 1;
-	}
-
-	//calc block size
-	dim3 blockS(16, 16);
-	dim3 gridS(cols / 16, rows / 16);
-	if (cols % 16) {
-		gridS.x += 1;
-	}
-	if (rows % 16) {
-		gridS.y += 1;
-	}
-}
-
 int CuH_transpose32FC1(int rows, int cols, void* dev_src, void *dev_dst) {
 	cudaError_t cudaStatus = cudaSuccess;
 
