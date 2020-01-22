@@ -184,6 +184,36 @@ void transposeAndFFTbyCV(Mat &img) {
 
 int main()
 {
+	//VideoCapture cap;
+	//cap.open("f:/outtest.avi");
+	//if (cap.isOpened()) {
+	//	Mat m;
+	//	for (int i = 0; i < 10; i++)
+	//	{
+	//		cap.read(m);
+	//		if (!m.empty()) {
+	//			imshow("video", m);
+	//			waitKey(30);
+	//		}
+	//	}
+	//	
+	//}
+
+	//Mat vvmat;
+	//vvmat.create(cv::Size(500, 500), CV_16UC1);
+	//VideoWriter vwr;
+	//vwr.open("f:/outtest.avi",
+	//	CV_FOURCC('D', 'I', 'B', '0'),  //CV_FOURCC(' ', ' ', ' ', ' ')
+	//	24,
+	//	cv::Size(500, 500),
+	//	false
+	//	);
+	//for (int i = 0; i < 50; i++)
+	//{
+	//	vwr.write(vvmat);
+	//}
+	
+
 	Mat src = imread("./../../ats_raw_wave.png", CV_LOAD_IMAGE_UNCHANGED);
 
 	if (!src.empty() && src.data) {
@@ -288,7 +318,7 @@ int main()
 
 					// 开fft窗 和 乘以色散 复数数组
 					CuH_devCdataCalcWinAndDispersion(src.cols, src.rows, fftCdataPtr, fftWinFuncPtr, dispersionCPtr);
-
+					//CuH_zeroLeftComplexAndDivConst(src.rows, src.cols, src.cols, fftCdataPtr);
 					res = res && execC2CfftPlan(srcToFFTPlan, fftCdataPtr, fftCdataPtr, 1);	//IFFT by sample dir
 					if (!res) break;
 
